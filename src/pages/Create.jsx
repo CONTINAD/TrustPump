@@ -1,53 +1,154 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWallet } from '@solana/wallet-adapter-react'
+import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { Rocket, Shield, Lock, AlertTriangle, Clock, Upload, Info } from 'lucide-react'
+import { Keypair } from '@solana/web3.js'
+import bs58 from 'bs58'
+import { Rocket, Upload, X, Info, ExternalLink } from 'lucide-react'
 import './Create.css'
 
 function Create() {
-    const { connected, publicKey } = useWallet()
+    const { connected, publicKey, signTransaction } = useWallet()
+    const { connection } = useConnection()
     const navigate = useNavigate()
+    const fileInputRef = useRef(null)
 
     const [formData, setFormData] = useState({
         name: '',
         symbol: '',
-        description: '',
-        image: '',
+        description: '', // Optional
         twitter: '',
         telegram: '',
         website: '',
-        vestingHours: 24,
-        kycVerified: false,
     })
 
+    const [imageFile, setImageFile] = useState(null)
+    const [imagePreview, setImagePreview] = useState(null)
+    const [devBuyAmount, setDevBuyAmount] = useState(0) // SOL amount for dev buy
     const [isCreating, setIsCreating] = useState(false)
-    const [step, setStep] = useState(1)
+    const [error, setError] = useState('')
+    const [txSignature, setTxSignature] = useState('')
 
     const handleChange = (e) => {
-        const { name, value, type, checked } = e.target
+        const { name, value } = e.target
         setFormData(prev => ({
             ...prev,
-            [name]: type === 'checkbox' ? checked : value
+            [name]: value
         }))
+        setError('')
+    }
+
+    const handleImageSelect = (e) => {
+        const file = e.target.files[0]
+        if (file) {
+            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+                setError('Image must be less than 5MB')
+                return
+            }
+            setImageFile(file)
+            const reader = new FileReader()
+            reader.onloadend = () => {
+                setImagePreview(reader.result)
+            }
+            reader.readAsDataURL(file)
+            setError('')
+        }
+    }
+
+    const removeImage = () => {
+        setImageFile(null)
+        setImagePreview(null)
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ''
+        }
     }
 
     const handleCreate = async () => {
-        if (!connected) return
+        if (!connected || !publicKey) {
+            setError('Please connect your wallet')
+            return
+        }
+
+        if (!formData.name || !formData.symbol) {
+            setError('Name and symbol are required')
+            return
+        }
+
+        if (!imageFile) {
+            setError('Please upload an image for your token')
+            return
+        }
 
         setIsCreating(true)
+        setError('')
+        setTxSignature('')
 
-        // Simulate token creation
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        try {
+            // Step 1: Generate a random keypair for the token mint
+            const mintKeypair = Keypair.generate()
 
-        // Generate mock address
-        const mockAddress = 'NEW' + Date.now().toString().slice(-40).padStart(40, '1')
+            // Step 2: Upload metadata to IPFS via pump.fun
+            const metadataFormData = new FormData()
+            metadataFormData.append('file', imageFile)
+            metadataFormData.append('name', formData.name)
+            metadataFormData.append('symbol', formData.symbol.toUpperCase())
+            metadataFormData.append('description', formData.description || `${formData.name} - Created on TrustPump`)
+            metadataFormData.append('showName', 'true')
 
-        setIsCreating(false)
-        navigate(`/token/${mockAddress}?new=true`)
+            if (formData.twitter) metadataFormData.append('twitter', formData.twitter)
+            if (formData.telegram) metadataFormData.append('telegram', formData.telegram)
+            if (formData.website) metadataFormData.append('website', formData.website)
+
+            console.log('Uploading metadata to IPFS...')
+
+            const metadataResponse = await fetch('https://pump.fun/api/ipfs', {
+                method: 'POST',
+                body: metadataFormData,
+            })
+
+            if (!metadataResponse.ok) {
+                throw new Error('Failed to upload metadata to IPFS')
+            }
+
+            const metadataResult = await metadataResponse.json()
+            console.log('Metadata uploaded:', metadataResult)
+
+            // Step 3: Create the token via PumpPortal API
+            // Note: For production, you need a PumpPortal API key
+            // For now, we'll redirect to pump.fun with the metadata
+
+            // Open pump.fun with pre-filled data
+            const pumpUrl = `https://pump.fun/create`
+
+            // Store the token info in localStorage for reference
+            const tokenInfo = {
+                name: formData.name,
+                symbol: formData.symbol.toUpperCase(),
+                description: formData.description,
+                metadataUri: metadataResult.metadataUri,
+                mintAddress: mintKeypair.publicKey.toBase58(),
+                createdAt: Date.now(),
+                creator: publicKey.toBase58(),
+            }
+
+            localStorage.setItem('lastCreatedToken', JSON.stringify(tokenInfo))
+
+            // For a full integration, you would need a backend with PumpPortal API key
+            // For now, show success with the IPFS metadata
+            setTxSignature(metadataResult.metadataUri)
+
+            // Optional: Open pump.fun in new tab
+            window.open(pumpUrl, '_blank')
+
+        } catch (err) {
+            console.error('Token creation error:', err)
+            setError(err.message || 'Failed to create token')
+        } finally {
+            setIsCreating(false)
+        }
     }
 
-    const isFormValid = formData.name && formData.symbol && formData.description
+    const isFormValid = formData.name && formData.symbol && imageFile
 
     if (!connected) {
         return (
@@ -56,7 +157,7 @@ function Create() {
                     <div className="connect-prompt">
                         <div className="prompt-icon">🔐</div>
                         <h2>Connect Your Wallet</h2>
-                        <p>Connect your Solana wallet to launch a token on TrustPump</p>
+                        <p>Connect your Solana wallet to launch a token</p>
                         <WalletMultiButton />
                     </div>
                 </div>
@@ -69,31 +170,58 @@ function Create() {
             <div className="container">
                 <div className="page-header">
                     <h1>Launch Your Token</h1>
-                    <p>Create a verified, anti-rug token in minutes</p>
+                    <p>Create a token on pump.fun with TrustPump features</p>
                 </div>
 
                 <div className="create-layout">
                     <div className="create-form">
-                        {/* Step 1: Basic Info */}
-                        <div className={`form-section ${step === 1 ? 'active' : ''}`}>
-                            <div className="section-header-form">
-                                <span className="step-badge">1</span>
-                                <h3>Token Details</h3>
-                            </div>
-
-                            <div className="input-group">
-                                <label>Token Name *</label>
+                        {/* Image Upload - REQUIRED */}
+                        <div className="form-section">
+                            <h3>Token Image *</h3>
+                            <div className="image-upload-area">
+                                {imagePreview ? (
+                                    <div className="image-preview">
+                                        <img src={imagePreview} alt="Token preview" />
+                                        <button className="remove-image" onClick={removeImage}>
+                                            <X size={20} />
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div
+                                        className="upload-placeholder"
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <Upload size={40} />
+                                        <p>Click to upload image</p>
+                                        <span>PNG, JPG, GIF (max 5MB)</span>
+                                    </div>
+                                )}
                                 <input
-                                    type="text"
-                                    name="name"
-                                    placeholder="e.g. TrustCoin"
-                                    value={formData.name}
-                                    onChange={handleChange}
-                                    maxLength={32}
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept="image/*"
+                                    onChange={handleImageSelect}
+                                    style={{ display: 'none' }}
                                 />
                             </div>
+                        </div>
+
+                        {/* Basic Info */}
+                        <div className="form-section">
+                            <h3>Token Details</h3>
 
                             <div className="input-row">
+                                <div className="input-group">
+                                    <label>Name *</label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        placeholder="e.g. TrustCoin"
+                                        value={formData.name}
+                                        onChange={handleChange}
+                                        maxLength={32}
+                                    />
+                                </div>
                                 <div className="input-group">
                                     <label>Symbol *</label>
                                     <input
@@ -106,38 +234,24 @@ function Create() {
                                         style={{ textTransform: 'uppercase' }}
                                     />
                                 </div>
-                                <div className="input-group">
-                                    <label>Image Emoji</label>
-                                    <input
-                                        type="text"
-                                        name="image"
-                                        placeholder="e.g. 🚀"
-                                        value={formData.image}
-                                        onChange={handleChange}
-                                        maxLength={4}
-                                    />
-                                </div>
                             </div>
 
                             <div className="input-group">
-                                <label>Description *</label>
+                                <label>Description <span className="optional">(optional)</span></label>
                                 <textarea
                                     name="description"
                                     placeholder="Describe your token..."
                                     value={formData.description}
                                     onChange={handleChange}
                                     maxLength={500}
+                                    rows={3}
                                 />
-                                <span className="char-count">{formData.description.length}/500</span>
                             </div>
                         </div>
 
-                        {/* Step 2: Social Links */}
-                        <div className={`form-section ${step === 2 ? 'active' : ''}`}>
-                            <div className="section-header-form">
-                                <span className="step-badge">2</span>
-                                <h3>Social Links (Optional)</h3>
-                            </div>
+                        {/* Social Links - Optional */}
+                        <div className="form-section">
+                            <h3>Social Links <span className="optional">(optional)</span></h3>
 
                             <div className="input-group">
                                 <label>Twitter/X</label>
@@ -173,90 +287,58 @@ function Create() {
                             </div>
                         </div>
 
-                        {/* Step 3: Trust Settings */}
-                        <div className={`form-section ${step === 3 ? 'active' : ''}`}>
-                            <div className="section-header-form">
-                                <span className="step-badge">3</span>
-                                <h3>Trust Settings</h3>
-                            </div>
-
+                        {/* Dev Buy Amount */}
+                        <div className="form-section">
+                            <h3>Initial Buy <span className="optional">(optional)</span></h3>
                             <div className="input-group">
-                                <label>Dev Token Vesting Period</label>
-                                <select
-                                    name="vestingHours"
-                                    value={formData.vestingHours}
-                                    onChange={handleChange}
-                                >
-                                    <option value={6}>6 hours (Bronze tier)</option>
-                                    <option value={12}>12 hours (Silver tier)</option>
-                                    <option value={24}>24 hours (Gold tier)</option>
-                                    <option value={48}>48 hours (Diamond tier)</option>
-                                    <option value={72}>72 hours (Diamond+ tier)</option>
-                                </select>
-                                <span className="input-hint">
-                                    <Clock size={14} />
-                                    Longer vesting = higher trust score
-                                </span>
-                            </div>
-
-                            <div className="trust-option">
-                                <div className="option-info">
-                                    <Shield size={20} />
-                                    <div>
-                                        <h4>KYC Verification</h4>
-                                        <p>Verify your identity. Revealed only if you rug.</p>
-                                    </div>
-                                </div>
-                                <label className="toggle">
-                                    <input
-                                        type="checkbox"
-                                        name="kycVerified"
-                                        checked={formData.kycVerified}
-                                        onChange={handleChange}
-                                    />
-                                    <span className="toggle-slider"></span>
-                                </label>
+                                <label>Dev Buy Amount (SOL)</label>
+                                <input
+                                    type="number"
+                                    step="0.1"
+                                    min="0"
+                                    placeholder="0"
+                                    value={devBuyAmount}
+                                    onChange={(e) => setDevBuyAmount(parseFloat(e.target.value) || 0)}
+                                />
+                                <span className="input-hint">Amount of SOL to buy your own token at launch</span>
                             </div>
                         </div>
 
-                        {/* Navigation */}
-                        <div className="form-navigation">
-                            {step > 1 && (
-                                <button
-                                    className="btn btn-secondary"
-                                    onClick={() => setStep(step - 1)}
-                                >
-                                    Back
-                                </button>
-                            )}
-                            {step < 3 ? (
-                                <button
-                                    className="btn btn-primary"
-                                    onClick={() => setStep(step + 1)}
-                                    disabled={step === 1 && !isFormValid}
-                                >
-                                    Continue
-                                </button>
+                        {/* Error Display */}
+                        {error && (
+                            <div className="error-message">
+                                {error}
+                            </div>
+                        )}
+
+                        {/* Success Display */}
+                        {txSignature && (
+                            <div className="success-message">
+                                <p>✅ Metadata uploaded successfully!</p>
+                                <a href={txSignature} target="_blank" rel="noopener noreferrer">
+                                    View on IPFS <ExternalLink size={14} />
+                                </a>
+                            </div>
+                        )}
+
+                        {/* Submit */}
+                        <button
+                            className="btn btn-primary btn-lg submit-btn"
+                            onClick={handleCreate}
+                            disabled={!isFormValid || isCreating}
+                        >
+                            {isCreating ? (
+                                <>
+                                    <div className="spinner"></div>
+                                    Creating Token...
+                                </>
                             ) : (
-                                <button
-                                    className="btn btn-primary btn-lg"
-                                    onClick={handleCreate}
-                                    disabled={!isFormValid || isCreating}
-                                >
-                                    {isCreating ? (
-                                        <>
-                                            <div className="spinner"></div>
-                                            Creating...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <Rocket size={20} />
-                                            Launch Token (~0.02 SOL)
-                                        </>
-                                    )}
-                                </button>
+                                <>
+                                    <Rocket size={20} />
+                                    Create Token on Pump.fun
+                                </>
                             )}
-                        </div>
+                        </button>
                     </div>
 
                     {/* Preview */}
@@ -267,42 +349,41 @@ function Create() {
                             </div>
                             <div className="preview-content">
                                 <div className="preview-icon">
-                                    {formData.image || '🪙'}
-                                </div>
-                                <h3>${formData.symbol || 'TOKEN'}</h3>
-                                <p className="preview-name">{formData.name || 'Token Name'}</p>
-                                <p className="preview-desc">
-                                    {formData.description || 'Your token description will appear here...'}
-                                </p>
-
-                                <div className="preview-badges">
-                                    <span className="badge badge-trust">
-                                        <Lock size={12} />
-                                        LP Locked
-                                    </span>
-                                    <span className="badge badge-trust">
-                                        <Clock size={12} />
-                                        {formData.vestingHours}h Vesting
-                                    </span>
-                                    {formData.kycVerified && (
-                                        <span className="badge badge-diamond">
-                                            <Shield size={12} />
-                                            KYC Verified
-                                        </span>
+                                    {imagePreview ? (
+                                        <img src={imagePreview} alt="Token" />
+                                    ) : (
+                                        <span className="placeholder-icon">🪙</span>
                                     )}
                                 </div>
+                                <h3>${formData.symbol?.toUpperCase() || 'TOKEN'}</h3>
+                                <p className="preview-name">{formData.name || 'Token Name'}</p>
+                                <p className="preview-desc">
+                                    {formData.description || 'Your token description...'}
+                                </p>
                             </div>
                         </div>
 
                         <div className="info-card">
                             <Info size={20} />
                             <div>
-                                <h4>What happens when you launch?</h4>
+                                <h4>How it works</h4>
                                 <ul>
-                                    <li>Token is created with 1B supply</li>
-                                    <li>800M tokens go into bonding curve</li>
-                                    <li>You receive 2% of all trading fees</li>
-                                    <li>At $69K market cap, token graduates to Raydium</li>
+                                    <li>Upload your image & details</li>
+                                    <li>We store metadata on IPFS</li>
+                                    <li>Token launches on pump.fun</li>
+                                    <li>You earn creator fees on trades</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div className="info-card warning">
+                            <Info size={20} />
+                            <div>
+                                <h4>Requirements</h4>
+                                <ul>
+                                    <li>~0.02 SOL for creation fee</li>
+                                    <li>Name, symbol & image required</li>
+                                    <li>Description is optional</li>
                                 </ul>
                             </div>
                         </div>
