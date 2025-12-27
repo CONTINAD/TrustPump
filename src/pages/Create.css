@@ -160,6 +160,9 @@
 }
 
 .success-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
     padding: 16px;
     background: rgba(16, 185, 129, 0.1);
     border: 1px solid rgba(16, 185, 129, 0.3);
@@ -168,12 +171,49 @@
     margin-bottom: 20px;
 }
 
+.success-message svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.success-message p {
+    margin-bottom: 6px;
+}
+
 .success-message a {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     color: var(--trust-primary);
-    margin-top: 8px;
+}
+
+.status-message {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 12px;
+    color: var(--accent-blue);
+    margin-bottom: 20px;
+}
+
+.spinner-icon {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.fee-note {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-top: 12px;
 }
 
 .submit-btn {

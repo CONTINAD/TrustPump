@@ -2,13 +2,13 @@ import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet, useConnection } from '@solana/wallet-adapter-react'
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
-import { Keypair } from '@solana/web3.js'
+import { Keypair, VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { Rocket, Upload, X, Info, ExternalLink } from 'lucide-react'
+import { Rocket, Upload, X, Info, ExternalLink, Check, Loader } from 'lucide-react'
 import './Create.css'
 
 function Create() {
-    const { connected, publicKey, signTransaction } = useWallet()
+    const { connected, publicKey, signTransaction, sendTransaction } = useWallet()
     const { connection } = useConnection()
     const navigate = useNavigate()
     const fileInputRef = useRef(null)
@@ -16,7 +16,7 @@ function Create() {
     const [formData, setFormData] = useState({
         name: '',
         symbol: '',
-        description: '', // Optional
+        description: '',
         twitter: '',
         telegram: '',
         website: '',
@@ -24,10 +24,12 @@ function Create() {
 
     const [imageFile, setImageFile] = useState(null)
     const [imagePreview, setImagePreview] = useState(null)
-    const [devBuyAmount, setDevBuyAmount] = useState(0) // SOL amount for dev buy
+    const [devBuyAmount, setDevBuyAmount] = useState(0)
     const [isCreating, setIsCreating] = useState(false)
+    const [status, setStatus] = useState('')
     const [error, setError] = useState('')
     const [txSignature, setTxSignature] = useState('')
+    const [mintAddress, setMintAddress] = useState('')
 
     const handleChange = (e) => {
         const { name, value } = e.target
@@ -41,7 +43,7 @@ function Create() {
     const handleImageSelect = (e) => {
         const file = e.target.files[0]
         if (file) {
-            if (file.size > 5 * 1024 * 1024) { // 5MB limit
+            if (file.size > 5 * 1024 * 1024) {
                 setError('Image must be less than 5MB')
                 return
             }
@@ -81,25 +83,30 @@ function Create() {
 
         setIsCreating(true)
         setError('')
+        setStatus('Generating mint keypair...')
         setTxSignature('')
+        setMintAddress('')
 
         try {
             // Step 1: Generate a random keypair for the token mint
             const mintKeypair = Keypair.generate()
+            const mintPubkey = mintKeypair.publicKey.toBase58()
+            setMintAddress(mintPubkey)
+            console.log('Mint address:', mintPubkey)
 
             // Step 2: Upload metadata to IPFS via pump.fun
+            setStatus('Uploading metadata to IPFS...')
+
             const metadataFormData = new FormData()
             metadataFormData.append('file', imageFile)
             metadataFormData.append('name', formData.name)
             metadataFormData.append('symbol', formData.symbol.toUpperCase())
-            metadataFormData.append('description', formData.description || `${formData.name} - Created on TrustPump`)
+            metadataFormData.append('description', formData.description || formData.name)
             metadataFormData.append('showName', 'true')
 
             if (formData.twitter) metadataFormData.append('twitter', formData.twitter)
             if (formData.telegram) metadataFormData.append('telegram', formData.telegram)
             if (formData.website) metadataFormData.append('website', formData.website)
-
-            console.log('Uploading metadata to IPFS...')
 
             const metadataResponse = await fetch('https://pump.fun/api/ipfs', {
                 method: 'POST',
@@ -107,42 +114,103 @@ function Create() {
             })
 
             if (!metadataResponse.ok) {
-                throw new Error('Failed to upload metadata to IPFS')
+                const errText = await metadataResponse.text()
+                throw new Error(`Failed to upload metadata: ${errText}`)
             }
 
             const metadataResult = await metadataResponse.json()
             console.log('Metadata uploaded:', metadataResult)
 
-            // Step 3: Create the token via PumpPortal API
-            // Note: For production, you need a PumpPortal API key
-            // For now, we'll redirect to pump.fun with the metadata
+            // Step 3: Get the create transaction from PumpPortal
+            setStatus('Creating token transaction...')
 
-            // Open pump.fun with pre-filled data
-            const pumpUrl = `https://pump.fun/create`
+            const createResponse = await fetch('https://pumpportal.fun/api/trade-local', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    publicKey: publicKey.toBase58(),
+                    action: 'create',
+                    tokenMetadata: {
+                        name: formData.name,
+                        symbol: formData.symbol.toUpperCase(),
+                        uri: metadataResult.metadataUri,
+                    },
+                    mint: mintPubkey,
+                    denominatedInSol: 'true',
+                    amount: devBuyAmount || 0,
+                    slippage: 10,
+                    priorityFee: 0.0005,
+                    pool: 'pump',
+                }),
+            })
 
-            // Store the token info in localStorage for reference
+            if (!createResponse.ok) {
+                const errText = await createResponse.text()
+                throw new Error(`Failed to create transaction: ${errText}`)
+            }
+
+            // Step 4: Get the transaction bytes and deserialize
+            setStatus('Preparing transaction for signing...')
+
+            const txBuffer = await createResponse.arrayBuffer()
+            const tx = VersionedTransaction.deserialize(new Uint8Array(txBuffer))
+
+            // Step 5: Sign with mint keypair first
+            tx.sign([mintKeypair])
+
+            // Step 6: Have the wallet sign the transaction
+            setStatus('Please approve the transaction in your wallet...')
+
+            const signedTx = await signTransaction(tx)
+
+            // Step 7: Send the transaction
+            setStatus('Sending transaction to Solana...')
+
+            const signature = await connection.sendRawTransaction(signedTx.serialize(), {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed',
+            })
+
+            console.log('Transaction sent:', signature)
+
+            // Step 8: Confirm the transaction
+            setStatus('Confirming transaction...')
+
+            const confirmation = await connection.confirmTransaction(signature, 'confirmed')
+
+            if (confirmation.value.err) {
+                throw new Error('Transaction failed: ' + JSON.stringify(confirmation.value.err))
+            }
+
+            setTxSignature(signature)
+            setStatus('Token created successfully!')
+
+            // Store token info for later
             const tokenInfo = {
                 name: formData.name,
                 symbol: formData.symbol.toUpperCase(),
                 description: formData.description,
+                image: imagePreview,
                 metadataUri: metadataResult.metadataUri,
-                mintAddress: mintKeypair.publicKey.toBase58(),
+                mintAddress: mintPubkey,
+                txSignature: signature,
                 createdAt: Date.now(),
                 creator: publicKey.toBase58(),
             }
 
             localStorage.setItem('lastCreatedToken', JSON.stringify(tokenInfo))
 
-            // For a full integration, you would need a backend with PumpPortal API key
-            // For now, show success with the IPFS metadata
-            setTxSignature(metadataResult.metadataUri)
-
-            // Optional: Open pump.fun in new tab
-            window.open(pumpUrl, '_blank')
+            // Navigate to the token page after a short delay
+            setTimeout(() => {
+                navigate(`/token/${mintPubkey}?new=true`)
+            }, 2000)
 
         } catch (err) {
             console.error('Token creation error:', err)
             setError(err.message || 'Failed to create token')
+            setStatus('')
         } finally {
             setIsCreating(false)
         }
@@ -170,19 +238,19 @@ function Create() {
             <div className="container">
                 <div className="page-header">
                     <h1>Launch Your Token</h1>
-                    <p>Create a token on pump.fun with TrustPump features</p>
+                    <p>Create a real token on pump.fun directly from TrustPump</p>
                 </div>
 
                 <div className="create-layout">
                     <div className="create-form">
-                        {/* Image Upload - REQUIRED */}
+                        {/* Image Upload */}
                         <div className="form-section">
                             <h3>Token Image *</h3>
                             <div className="image-upload-area">
                                 {imagePreview ? (
                                     <div className="image-preview">
                                         <img src={imagePreview} alt="Token preview" />
-                                        <button className="remove-image" onClick={removeImage}>
+                                        <button className="remove-image" onClick={removeImage} disabled={isCreating}>
                                             <X size={20} />
                                         </button>
                                     </div>
@@ -202,6 +270,7 @@ function Create() {
                                     accept="image/*"
                                     onChange={handleImageSelect}
                                     style={{ display: 'none' }}
+                                    disabled={isCreating}
                                 />
                             </div>
                         </div>
@@ -220,6 +289,7 @@ function Create() {
                                         value={formData.name}
                                         onChange={handleChange}
                                         maxLength={32}
+                                        disabled={isCreating}
                                     />
                                 </div>
                                 <div className="input-group">
@@ -232,6 +302,7 @@ function Create() {
                                         onChange={handleChange}
                                         maxLength={10}
                                         style={{ textTransform: 'uppercase' }}
+                                        disabled={isCreating}
                                     />
                                 </div>
                             </div>
@@ -245,11 +316,12 @@ function Create() {
                                     onChange={handleChange}
                                     maxLength={500}
                                     rows={3}
+                                    disabled={isCreating}
                                 />
                             </div>
                         </div>
 
-                        {/* Social Links - Optional */}
+                        {/* Social Links */}
                         <div className="form-section">
                             <h3>Social Links <span className="optional">(optional)</span></h3>
 
@@ -261,6 +333,7 @@ function Create() {
                                     placeholder="https://twitter.com/..."
                                     value={formData.twitter}
                                     onChange={handleChange}
+                                    disabled={isCreating}
                                 />
                             </div>
 
@@ -272,6 +345,7 @@ function Create() {
                                     placeholder="https://t.me/..."
                                     value={formData.telegram}
                                     onChange={handleChange}
+                                    disabled={isCreating}
                                 />
                             </div>
 
@@ -283,26 +357,37 @@ function Create() {
                                     placeholder="https://..."
                                     value={formData.website}
                                     onChange={handleChange}
+                                    disabled={isCreating}
                                 />
                             </div>
                         </div>
 
-                        {/* Dev Buy Amount */}
+                        {/* Dev Buy */}
                         <div className="form-section">
-                            <h3>Initial Buy <span className="optional">(optional)</span></h3>
+                            <h3>Initial Dev Buy <span className="optional">(optional)</span></h3>
                             <div className="input-group">
-                                <label>Dev Buy Amount (SOL)</label>
+                                <label>Amount (SOL)</label>
                                 <input
                                     type="number"
                                     step="0.1"
                                     min="0"
+                                    max="50"
                                     placeholder="0"
                                     value={devBuyAmount}
                                     onChange={(e) => setDevBuyAmount(parseFloat(e.target.value) || 0)}
+                                    disabled={isCreating}
                                 />
-                                <span className="input-hint">Amount of SOL to buy your own token at launch</span>
+                                <span className="input-hint">Buy your own token at launch (0 = no dev buy)</span>
                             </div>
                         </div>
+
+                        {/* Status Display */}
+                        {status && (
+                            <div className="status-message">
+                                <Loader size={16} className="spinner-icon" />
+                                {status}
+                            </div>
+                        )}
 
                         {/* Error Display */}
                         {error && (
@@ -314,10 +399,26 @@ function Create() {
                         {/* Success Display */}
                         {txSignature && (
                             <div className="success-message">
-                                <p>✅ Metadata uploaded successfully!</p>
-                                <a href={txSignature} target="_blank" rel="noopener noreferrer">
-                                    View on IPFS <ExternalLink size={14} />
-                                </a>
+                                <Check size={20} />
+                                <div>
+                                    <p><strong>Token Created Successfully!</strong></p>
+                                    <p>Mint: {mintAddress.slice(0, 8)}...{mintAddress.slice(-8)}</p>
+                                    <a
+                                        href={`https://solscan.io/tx/${txSignature}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                    >
+                                        View Transaction <ExternalLink size={14} />
+                                    </a>
+                                    <a
+                                        href={`https://pump.fun/${mintAddress}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        style={{ marginLeft: '16px' }}
+                                    >
+                                        View on Pump.fun <ExternalLink size={14} />
+                                    </a>
+                                </div>
                             </div>
                         )}
 
@@ -329,8 +430,8 @@ function Create() {
                         >
                             {isCreating ? (
                                 <>
-                                    <div className="spinner"></div>
-                                    Creating Token...
+                                    <Loader size={20} className="spinner-icon" />
+                                    {status || 'Creating...'}
                                 </>
                             ) : (
                                 <>
@@ -339,6 +440,10 @@ function Create() {
                                 </>
                             )}
                         </button>
+
+                        <p className="fee-note">
+                            Cost: ~0.02 SOL (network fee) {devBuyAmount > 0 && `+ ${devBuyAmount} SOL (dev buy)`}
+                        </p>
                     </div>
 
                     {/* Preview */}
@@ -358,7 +463,7 @@ function Create() {
                                 <h3>${formData.symbol?.toUpperCase() || 'TOKEN'}</h3>
                                 <p className="preview-name">{formData.name || 'Token Name'}</p>
                                 <p className="preview-desc">
-                                    {formData.description || 'Your token description...'}
+                                    {formData.description || 'Your token will appear on pump.fun'}
                                 </p>
                             </div>
                         </div>
@@ -366,24 +471,12 @@ function Create() {
                         <div className="info-card">
                             <Info size={20} />
                             <div>
-                                <h4>How it works</h4>
+                                <h4>What happens</h4>
                                 <ul>
-                                    <li>Upload your image & details</li>
-                                    <li>We store metadata on IPFS</li>
-                                    <li>Token launches on pump.fun</li>
-                                    <li>You earn creator fees on trades</li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        <div className="info-card warning">
-                            <Info size={20} />
-                            <div>
-                                <h4>Requirements</h4>
-                                <ul>
-                                    <li>~0.02 SOL for creation fee</li>
-                                    <li>Name, symbol & image required</li>
-                                    <li>Description is optional</li>
+                                    <li>Image + metadata stored on IPFS</li>
+                                    <li>Token created on pump.fun</li>
+                                    <li>Bonding curve starts at $0</li>
+                                    <li>Anyone can buy/sell</li>
                                 </ul>
                             </div>
                         </div>
