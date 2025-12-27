@@ -94,56 +94,36 @@ function Create() {
             setMintAddress(mintPubkey)
             console.log('Mint address:', mintPubkey)
 
-            // Step 2: Upload metadata to IPFS via pump.fun
+            // Step 2: Upload metadata and create transaction via PumpPortal bundled API
+            // This handles IPFS upload server-side, avoiding CORS issues
             setStatus('Uploading metadata to IPFS...')
 
-            const metadataFormData = new FormData()
-            metadataFormData.append('file', imageFile)
-            metadataFormData.append('name', formData.name)
-            metadataFormData.append('symbol', formData.symbol.toUpperCase())
-            metadataFormData.append('description', formData.description || formData.name)
-            metadataFormData.append('showName', 'true')
+            const bundledFormData = new FormData()
+            bundledFormData.append('file', imageFile)
+            bundledFormData.append('name', formData.name)
+            bundledFormData.append('symbol', formData.symbol.toUpperCase())
+            bundledFormData.append('description', formData.description || formData.name)
+            bundledFormData.append('showName', 'true')
 
-            if (formData.twitter) metadataFormData.append('twitter', formData.twitter)
-            if (formData.telegram) metadataFormData.append('telegram', formData.telegram)
-            if (formData.website) metadataFormData.append('website', formData.website)
+            if (formData.twitter) bundledFormData.append('twitter', formData.twitter)
+            if (formData.telegram) bundledFormData.append('telegram', formData.telegram)
+            if (formData.website) bundledFormData.append('website', formData.website)
 
-            const metadataResponse = await fetch('https://pump.fun/api/ipfs', {
-                method: 'POST',
-                body: metadataFormData,
-            })
+            // Add transaction parameters
+            bundledFormData.append('publicKey', publicKey.toBase58())
+            bundledFormData.append('action', 'create')
+            bundledFormData.append('mint', mintPubkey)
+            bundledFormData.append('denominatedInSol', 'true')
+            bundledFormData.append('amount', String(devBuyAmount || 0))
+            bundledFormData.append('slippage', '10')
+            bundledFormData.append('priorityFee', '0.0005')
+            bundledFormData.append('pool', 'pump')
 
-            if (!metadataResponse.ok) {
-                const errText = await metadataResponse.text()
-                throw new Error(`Failed to upload metadata: ${errText}`)
-            }
-
-            const metadataResult = await metadataResponse.json()
-            console.log('Metadata uploaded:', metadataResult)
-
-            // Step 3: Get the create transaction from PumpPortal
             setStatus('Creating token transaction...')
 
-            const createResponse = await fetch('https://pumpportal.fun/api/trade-local', {
+            const createResponse = await fetch('https://pumpportal.fun/api/trade', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    publicKey: publicKey.toBase58(),
-                    action: 'create',
-                    tokenMetadata: {
-                        name: formData.name,
-                        symbol: formData.symbol.toUpperCase(),
-                        uri: metadataResult.metadataUri,
-                    },
-                    mint: mintPubkey,
-                    denominatedInSol: 'true',
-                    amount: devBuyAmount || 0,
-                    slippage: 10,
-                    priorityFee: 0.0005,
-                    pool: 'pump',
-                }),
+                body: bundledFormData,
             })
 
             if (!createResponse.ok) {
