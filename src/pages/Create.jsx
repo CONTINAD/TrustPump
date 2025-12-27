@@ -94,40 +94,62 @@ function Create() {
             setMintAddress(mintPubkey)
             console.log('Mint address:', mintPubkey)
 
-            // Step 2: Upload metadata and create transaction via PumpPortal bundled API
+            // Step 2: Upload image and metadata to IPFS via pump.fun
             setStatus('Uploading metadata to IPFS...')
 
-            const bundledFormData = new FormData()
-            bundledFormData.append('file', imageFile)
-            bundledFormData.append('name', formData.name)
-            bundledFormData.append('symbol', formData.symbol.toUpperCase())
-            bundledFormData.append('description', formData.description || formData.name)
-            bundledFormData.append('showName', 'true')
+            const ipfsFormData = new FormData()
+            ipfsFormData.append('file', imageFile)
+            ipfsFormData.append('name', formData.name)
+            ipfsFormData.append('symbol', formData.symbol.toUpperCase())
+            ipfsFormData.append('description', formData.description || formData.name)
+            ipfsFormData.append('showName', 'true')
 
-            if (formData.twitter) bundledFormData.append('twitter', formData.twitter)
-            if (formData.telegram) bundledFormData.append('telegram', formData.telegram)
-            if (formData.website) bundledFormData.append('website', formData.website)
+            if (formData.twitter) ipfsFormData.append('twitter', formData.twitter)
+            if (formData.telegram) ipfsFormData.append('telegram', formData.telegram)
+            if (formData.website) ipfsFormData.append('website', formData.website)
 
-            // PumpPortal bundled endpoint - handles IPFS + transaction creation
-            bundledFormData.append('action', 'create')
-            bundledFormData.append('mint', mintPubkey)
-            bundledFormData.append('denominatedInSol', 'true')
-            bundledFormData.append('amount', String(devBuyAmount || 0))
-            bundledFormData.append('slippage', '10')
-            bundledFormData.append('priorityFee', '0.0005')
-            bundledFormData.append('pool', 'pump')
+            // Use proxy to avoid CORS - Vite forwards /api/ipfs to pump.fun
+            const ipfsResponse = await fetch('/api/ipfs', {
+                method: 'POST',
+                body: ipfsFormData,
+            })
 
+            if (!ipfsResponse.ok) {
+                const errText = await ipfsResponse.text()
+                throw new Error(`Failed to upload to IPFS: ${errText}`)
+            }
+
+            const ipfsResult = await ipfsResponse.json()
+            console.log('IPFS upload result:', ipfsResult)
+
+            // Step 3: Create token via PumpPortal API (JSON request)
             setStatus('Creating token on pump.fun...')
 
             const apiKey = import.meta.env.VITE_PUMPPORTAL_API_KEY
             const createResponse = await fetch(`https://pumpportal.fun/api/trade?api-key=${apiKey}`, {
                 method: 'POST',
-                body: bundledFormData,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: 'create',
+                    tokenMetadata: {
+                        name: formData.name,
+                        symbol: formData.symbol.toUpperCase(),
+                        uri: ipfsResult.metadataUri,
+                    },
+                    mint: bs58.encode(mintKeypair.secretKey),
+                    denominatedInSol: 'true',
+                    amount: devBuyAmount || 0,
+                    slippage: 10,
+                    priorityFee: 0.0005,
+                    pool: 'pump',
+                }),
             })
 
             if (!createResponse.ok) {
                 const errText = await createResponse.text()
-                throw new Error(`Failed to create transaction: ${errText}`)
+                throw new Error(`Failed to create token: ${errText}`)
             }
 
             // The bundled API handles everything server-side and returns JSON
