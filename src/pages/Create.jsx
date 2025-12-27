@@ -95,7 +95,6 @@ function Create() {
             console.log('Mint address:', mintPubkey)
 
             // Step 2: Upload metadata and create transaction via PumpPortal bundled API
-            // This handles IPFS upload server-side, avoiding CORS issues
             setStatus('Uploading metadata to IPFS...')
 
             const bundledFormData = new FormData()
@@ -109,8 +108,7 @@ function Create() {
             if (formData.telegram) bundledFormData.append('telegram', formData.telegram)
             if (formData.website) bundledFormData.append('website', formData.website)
 
-            // Add transaction parameters
-            bundledFormData.append('publicKey', publicKey.toBase58())
+            // PumpPortal bundled endpoint - handles IPFS + transaction creation
             bundledFormData.append('action', 'create')
             bundledFormData.append('mint', mintPubkey)
             bundledFormData.append('denominatedInSol', 'true')
@@ -121,7 +119,8 @@ function Create() {
 
             setStatus('Creating token transaction...')
 
-            const createResponse = await fetch('https://pumpportal.fun/api/trade', {
+            const apiKey = import.meta.env.VITE_PUMPPORTAL_API_KEY
+            const createResponse = await fetch(`https://pumpportal.fun/api/trade?api-key=${apiKey}`, {
                 method: 'POST',
                 body: bundledFormData,
             })
