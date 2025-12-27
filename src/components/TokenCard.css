@@ -1,0 +1,210 @@
+.token-card {
+    display: block;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 20px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.token-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gradient-trust);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.token-card:hover {
+    border-color: rgba(16, 185, 129, 0.3);
+    transform: translateY(-4px);
+}
+
+.token-card:hover::before {
+    opacity: 1;
+}
+
+.token-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.dev-tier {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 100px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.trust-score {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.trust-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.trust-value {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+
+.trust-value.high {
+    color: var(--trust-primary);
+}
+
+.trust-value.medium {
+    color: var(--warning);
+}
+
+.trust-value.low {
+    color: var(--danger);
+}
+
+.token-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 16px;
+}
+
+.token-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+    font-size: 1.8rem;
+}
+
+.token-name {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.token-fullname {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.token-stats {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.token-stat {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: 10px;
+}
+
+.token-stat .stat-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+}
+
+.token-stat .stat-value {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.token-stat .stat-value.positive {
+    color: var(--trust-primary);
+}
+
+.token-stat .stat-value.negative {
+    color: var(--danger);
+}
+
+.bonding-curve {
+    margin-bottom: 14px;
+}
+
+.bonding-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.bonding-bar {
+    height: 6px;
+    background: var(--bg-secondary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.bonding-fill {
+    height: 100%;
+    background: var(--gradient-trust);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+.token-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.safety-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.2);
+    border-radius: 6px;
+    font-size: 0.75rem;
+    color: var(--trust-secondary);
+}
+
+.token-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid var(--border-color);
+}
+
+.created-at {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.graduated-badge {
+    font-size: 0.8rem;
+    color: var(--accent-gold);
+    font-weight: 500;
+}
