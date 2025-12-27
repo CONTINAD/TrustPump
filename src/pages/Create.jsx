@@ -117,7 +117,7 @@ function Create() {
             bundledFormData.append('priorityFee', '0.0005')
             bundledFormData.append('pool', 'pump')
 
-            setStatus('Creating token transaction...')
+            setStatus('Creating token on pump.fun...')
 
             const apiKey = import.meta.env.VITE_PUMPPORTAL_API_KEY
             const createResponse = await fetch(`https://pumpportal.fun/api/trade?api-key=${apiKey}`, {
@@ -130,37 +130,14 @@ function Create() {
                 throw new Error(`Failed to create transaction: ${errText}`)
             }
 
-            // Step 4: Get the transaction bytes and deserialize
-            setStatus('Preparing transaction for signing...')
+            // The bundled API handles everything server-side and returns JSON
+            const result = await createResponse.json()
+            console.log('Token created:', result)
 
-            const txBuffer = await createResponse.arrayBuffer()
-            const tx = VersionedTransaction.deserialize(new Uint8Array(txBuffer))
-
-            // Step 5: Sign with mint keypair first
-            tx.sign([mintKeypair])
-
-            // Step 6: Have the wallet sign the transaction
-            setStatus('Please approve the transaction in your wallet...')
-
-            const signedTx = await signTransaction(tx)
-
-            // Step 7: Send the transaction
-            setStatus('Sending transaction to Solana...')
-
-            const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-                skipPreflight: false,
-                preflightCommitment: 'confirmed',
-            })
-
-            console.log('Transaction sent:', signature)
-
-            // Step 8: Confirm the transaction
-            setStatus('Confirming transaction...')
-
-            const confirmation = await connection.confirmTransaction(signature, 'confirmed')
-
-            if (confirmation.value.err) {
-                throw new Error('Transaction failed: ' + JSON.stringify(confirmation.value.err))
+            // Get the signature from the response
+            const signature = result.signature || result.txSignature || result.tx
+            if (!signature) {
+                throw new Error('No transaction signature in response: ' + JSON.stringify(result))
             }
 
             setTxSignature(signature)
@@ -172,7 +149,6 @@ function Create() {
                 symbol: formData.symbol.toUpperCase(),
                 description: formData.description,
                 image: imagePreview,
-                metadataUri: metadataResult.metadataUri,
                 mintAddress: mintPubkey,
                 txSignature: signature,
                 createdAt: Date.now(),
